@@ -17,7 +17,6 @@
                   ACCESS MODE   IS SEQUENTIAL
                   FILE STATUS   IS fs-txt-import.
 
-
            select arq-cliente assign to disk wid-arq-cliente
                   organization         is indexed
                   access mode          is dynamic
@@ -27,31 +26,17 @@
                                           WITH DUPLICATES
                   lock mode            is manual
                   file status          is ws-resultado-acesso.
-       
-
-
-           SELECT arq-cliente ASSIGN TO DISK
-                  ORGANIZATION  IS INDEXED
-                  ACCESS MODE   IS DYNAMIC
-                  RECORD  KEY   IS cliente-chave
-                  ALTERNATE RECORD KEY IS cliente-razao
-                                          WITH DUPLICATES
-                  LOCK MODE     IS AUTOMATIC
-                  FILE STATUS   IS ws-resultado-acesso.
 
        DATA DIVISION.
        FILE SECTION.
        FD  txt-import.
        01  linha-txt-import                     pic x(1000).
 
-
       *Código Cliente    - pic  9(007);
       *CNPJ              - pic  9(014);
       *Razão Social      - pic  x(040);
       *Latitude          - pic s9(003)v9(008);
       *Longitude         - pic s9(003)v9(008);
-
-
 
        FD  arq-cliente
            LABEL RECORD IS STANDARD
@@ -68,7 +53,6 @@
            05 cliente-latitude           PIC  s9(003)v9(008).
            05 cliente-longitude          PIC  s9(003)v9(008).
 
-
        WORKING-STORAGE SECTION.
        01  AREAS-DE-TRABALHO-1.
            05 wx-opcao              pic  x(001) value space.
@@ -77,7 +61,7 @@
            05 NM-CODIGO             PIC  9(005) VALUE ZEROS.
            05 fs-txt-import         pic  x(002) value spaces.
            05 lb-txt-import         pic  x(050) value
-              "\xampp\htdocs\cobolware\arq-cliente.txt-import".
+              "c:\import\arq-cliente.txt".
            05 marcador              pic  x(002) value spaces.
            05 WS-RETORNO-TELA       PIC  X(078).
            05 MASC-VALOR            PIC  ZZZZZZZ9.99
@@ -88,6 +72,22 @@
            05 REGISTROS             PIC  9(006) VALUE 0.
            05 ws-resultado-acesso   PIC  X(002) VALUE "00".
            05 wid-arq-cliente       PIC  X(050) VALUE "arq-cliente".
+           05 wx-finalizado         pic  x(001) value space.
+              88 sucesso            value "S".
+              88 com-erro           value "E".
+           05 wx-tecla              pic  9(002) value zeros.
+              88 wx-enter           value 00.
+              88 wx-esc             value 01.
+              88 wx-f1              value 02.
+              88 wx-f2              value 03.
+              88 wx-f3              value 04.
+              88 wx-f4              value 05.
+              88 wx-f5              value 06.
+              88 wx-f6              value 07.
+              88 wx-f7              value 08.
+              88 wx-f8              value 09.
+              88 wx-f9              value 10.
+              88 wx-f10             value 11.
        01  WS-REG.
            05 WS-CHAVE.
               10 WS-CODIGO          PIC  X(005).
@@ -148,8 +148,9 @@
             line 06 col 40
             pic -ZZ9,99999999 using cliente-longitude BLANK WHEN zeros.
        01  opcoes.
-         03 pic x(058) line 21 col 12 value
-         "(C)onsulta - (A)ltera - (I)nclui - (E)xclui - (V)olta Menu".
+         03 pic x(074) line 21 col 04 value
+         "(C)onsulta - (A)ltera - (I)nclui - (E)xclui - i(M)porta txt - 
+       - "(V)olta Menu".
          03 pic x(070) line 23 col 03 value
          "Selecione a Opcao Desejada:  X  (Letra em parenteses das opcoe
        - "s acima)".
@@ -164,8 +165,7 @@
            05  AREA-LINK                  PIC  X(100).
        PROCEDURE DIVISION USING LINKAGEM-CAMPOS.
        000-INICIO.
-           initialize cliente-REG
-                      wx-opcao.
+           initialize wx-opcao.
            perform 999-monta-tela thru 999-99-fim.
            display opcoes.
            perform test after until wx-opcao not = spaces
@@ -181,31 +181,27 @@
                 PERFORM 900-FILE-STATUS THRU 900-99-FIM
            END-IF.
 
+           initialize cliente-REG
            EVALUATE wx-opcao
                 when "C"
                     perform 980-pesquisa-por thru 980-99-fim
                 when "A"
                     perform 980-pesquisa-por thru 980-99-fim
-                    accept variaveis
-                    rewrite cliente-REG
+                    initialize wx-finalizado 
+                    perform 600-trata-dados  thru 600-99-fim
+                            until sucesso or wx-esc
+                    if not wx-esc        
+                       rewrite cliente-REG
+                    end-if   
                 when "E"
                     perform 980-pesquisa-por thru 980-99-fim
                     IF ws-resultado-acesso < "10"
                        DELETE arq-cliente Record
                     END-IF
                 when "I"
-                    initialize cliente-reg
-                               NM-CODIGO
-                    move 9999999 to cliente-codigo
-                    start arq-cliente key is less cliente-chave
-                    READ arq-cliente PREVIOUS RECORD IGNORE LOCK
-                    IF ws-resultado-acesso < "10"
-                       move cliente-codigo TO NM-CODIGO
-                    end-if
-                    ADD  1               TO NM-CODIGO
-                    move NM-CODIGO       to cliente-codigo
-                    accept variaveis
-                    write cliente-REG
+                    perform 100-inclusao   thru 100-99-fim
+                when "M"
+                    perform 090-txt-import thru 090-99-fim
                 when "V"
                     continue
            END-EVALUATE.
@@ -214,7 +210,7 @@
        000-99-FIM.
            STOP RUN.
 
-       090-INICIO-txt-import.
+       090-txt-import.
            open input txt-import.
            perform test after until fs-txt-import > "09"
                read txt-import
@@ -226,6 +222,59 @@
            close txt-import.
        090-99-FIM. EXIT.
        
+       100-inclusao.
+           initialize cliente-reg
+                      NM-CODIGO
+           move 9999999 to cliente-codigo
+           start arq-cliente key is less cliente-chave
+           READ arq-cliente PREVIOUS RECORD IGNORE LOCK
+           IF ws-resultado-acesso < "10"
+              move cliente-codigo TO NM-CODIGO
+           end-if
+           ADD  1               TO NM-CODIGO
+           move NM-CODIGO       to cliente-codigo
+           perform 600-trata-dados  thru 600-99-fim
+                   until sucesso or wx-esc
+           if not wx-esc        
+              write cliente-REG
+           end-if.   
+       100-99-fim. exit.
+
+       600-trata-dados.
+           accept variaveis
+           accept wx-tecla from escape key.
+           if not wx-esc
+              if cliente-codigo = zeros
+                 set com-erro to true
+              end-if
+              if cliente-razao = spaces
+                 set com-erro to true
+              end-if
+              if cliente-cnpj not = zeros
+                 perform 700-valida-cnpj
+              else
+                 set com-erro to true
+              end-if   
+              if cliente-latitude = zeros
+                 set com-erro to true
+              end-if
+              if cliente-longitude = zeros
+                 set com-erro to true
+              end-if
+           end-if.
+       600-99-fim. exit.
+
+       700-valida-cnpj.
+      *    initialize lk-ambe501.
+      *    set link-ambe501-validar to true
+      *    move cliente-cnpj to ambe501-cnpj
+      *    call 'AMBE501' USING lk-ambe501.
+      *    if not link-ambe501-ok
+      *       set com-erro to true
+      *    else
+              set sucesso  to true.
+      *    end-if.
+
        900-FILE-STATUS.
            initialize cliente-reg
            if ws-resultado-acesso = "23"
